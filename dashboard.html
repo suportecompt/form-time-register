@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel - Gestão de Intervenções</title>
+    
+    <meta name="robots" content="noindex, nofollow">
+
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="style.css">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+    <header class="bg-white shadow border-b border-gray-100">
+        <nav class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-4">
+                <img src="logo.png" alt="TechFlow Logo" class="h-10 object-contain" onerror="this.src='https://via.placeholder.com/150x50?text=LOGO'">
+                <h1 class="text-xl font-semibold text-gray-800 text-center sm:text-left">Gestão de Intervenções</h1>
+            </div>
+
+            <div class="flex items-center justify-between w-full sm:w-auto gap-4 text-sm">
+                <div class="text-right">
+                    <span class="block font-medium text-gray-700 truncate max-w-[150px] sm:max-w-xs" id="user-email-display">A carregar...</span>
+                    <span class="block text-xs text-gray-500">Sessão Ativa</span>
+                </div>
+                <button id="btn-logout" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg transition text-sm font-medium">
+                    Sair
+                </button>
+            </div>
+        </nav>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-10">
+
+        <section class="bg-white p-4 sm:p-8 rounded-2xl shadow border border-gray-100">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+    
+                <div class="flex flex-col sm:flex-row sm:items-center justify-start gap-8 w-full">
+                    <h2 class="text-lg font-bold text-gray-800 whitespace-nowrap">Meus Registros de Tempo</h2>
+                    
+                    <span id="daily-total" class="hidden px-3 py-1 bg-blue-50 text-blue-500 text-sm font-medium rounded-lg border border-blue-100/50 whitespace-nowrap w-fit">
+                    </span>
+                </div>
+                
+                <a href="#form-section" class="w-full sm:w-auto flex-shrink-0 text-center bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition flex items-center justify-center gap-2">
+                    + Novo Registo
+                </a>
+                
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-4 mb-4 pb-4 border-b border-gray-100">
+    
+                <div class="relative flex-1">
+                    <i data-lucide="search" class="absolute left-3 top-2.5 w-4 h-4 text-gray-400"></i>
+                    <input type="text" id="table_search" placeholder="Procurar por ID ou título..." class="w-full pl-9 pr-10 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all">
+                    <button type="button" id="clear_table_search" class="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 hidden transition-colors">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+
+                <div class="relative w-full sm:w-44">
+                    <input type="date" id="table_date_filter" class="w-full px-3 pr-8 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white">
+                    
+                    <button type="button" id="clear_date_filter" class="absolute right-2 top-2.5 text-gray-400 hover:text-gray-600 hidden transition-colors bg-white">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+
+                <div class="relative w-full sm:w-56">
+                    <button type="button" id="custom_sort_btn" class="w-full flex items-center justify-between px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all">
+                        <span id="custom_sort_label">Data: Mais recentes</span>
+                        <i data-lucide="chevron-down" class="w-4 h-4 text-gray-400"></i>
+                    </button>
+                    
+                    <ul id="custom_sort_options" class="absolute right-0 z-50 w-full mt-1 bg-white border border-gray-100 rounded-lg shadow-xl hidden overflow-hidden">
+                        <li data-value="date_desc" class="sort-option px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors border-b border-gray-50">Data: Mais recentes</li>
+                        <li data-value="date_asc" class="sort-option px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors border-b border-gray-50">Data: Mais antigos</li>
+                        <li data-value="time_desc" class="sort-option px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors border-b border-gray-50">Tempo: Mais horas</li>
+                        <li data-value="time_asc" class="sort-option px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors">Tempo: Menos horas</li>
+                    </ul>
+                    <input type="hidden" id="table_sort" value="date_desc">
+                </div>
+            </div>
+
+            <div class="overflow-x-hidden overflow-y-auto max-h-[400px] rounded-b-lg border-b border-gray-100">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-gray-50 text-gray-700 uppercase text-xs sticky top-0 shadow-sm z-10 hide-on-mobile sm:table-header-group">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 tracking-wider rounded-tl-lg">Data</th>
+                            <th scope="col" class="px-6 py-3 tracking-wider">Ticket</th>
+                            <th scope="col" class="px-6 py-3 tracking-wider text-center">Tempo</th>
+                            <th scope="col" class="px-6 py-3 tracking-wider text-right rounded-tr-lg">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tickets-body" class="divide-y divide-gray-100 bg-white">
+                        <tr>
+                            <td colspan="4" class="px-6 py-4 text-center text-gray-500">A carregar dados...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="form-section" class="bg-white p-4 sm:p-8 rounded-2xl shadow border border-gray-100">
+            <h2 class="text-xl font-bold text-gray-800 mb-6 border-b pb-4">Adicionar Intervenção</h2>
+            
+            <form id="record-form" class="space-y-6 max-w-2xl">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="task_date" class="block text-sm font-medium text-gray-700 mb-1">Data da Intervenção</label>
+                        <input type="date" id="task_date" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Tempo Trabalhado</label>
+                        <div class="flex items-center gap-2">
+                            <div class="relative w-full">
+                                <input type="number" id="work_hours" min="0" placeholder="0" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                                <span class="absolute right-3 top-2 text-gray-400">h</span>
+                            </div>
+                            <span class="text-gray-400 font-bold">:</span>
+                            <div class="relative w-full">
+                                <input type="number" id="work_minutes" min="0" max="59" placeholder="0" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                                <span class="absolute right-3 top-2 text-gray-400">m</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="w-full">
+                    <label for="ticket_search" class="block text-sm font-medium text-gray-700 mb-1">Ticket / Chamado</label>
+                    
+                    <div class="relative w-full">
+                        <input type="text" id="ticket_search" placeholder="Escreve para procurar ou clica para ver recentes..." autocomplete="off" class="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white">
+                        
+                        <button type="button" id="clear_ticket_search" class="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 hidden transition-colors">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
+                        
+                        <input type="hidden" id="ticket_select" required>
+                        
+                        <ul id="ticket_dropdown" class="absolute z-50 w-full bg-white border border-gray-200 bottom-full mb-1 rounded-lg shadow-xl max-h-60 overflow-y-auto hidden">
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row gap-3 pt-4">
+                    <button type="submit" id="btn-save" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors duration-200">
+                        Guardar Registo
+                    </button>
+                    <button type="reset" class="w-full sm:w-auto bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 px-6 rounded-lg transition-colors duration-200">
+                        Limpar
+                    </button>
+                </div>
+            </form>
+        </section>
+
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
