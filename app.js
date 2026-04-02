@@ -1,10 +1,61 @@
-// 1. Configuração do Supabase
-const supabaseUrl = 'https://ibpgiqwcuhypwwapafnc.supabase.co';
-const supabaseKey = 'sb_publishable_nyD73iRFwU9OGos23psE7g_ys0oNWSm';
-const supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey);
+// ==========================================
+// 1. HELPER: FUNÇÃO CENTRAL DE FETCH (O "Motor" AJAX)
+// ==========================================
+window.apiFetch = async function(endpoint, options = {}) {
+    const token = localStorage.getItem('sb_token');
+    
+    const headers = {
+        'apikey': CONFIG.SUPABASE_ANON_KEY, // Lendo do config.js
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation' 
+    };
+
+    if (token) {
+        headers['Authorization'] = `${token}`; 
+    } else if (!endpoint.includes('/auth/v1/token')) {
+        console.error(`🔒 Acesso negado: Tentativa de aceder a ${endpoint} sem sessão iniciada.`);
+        return Promise.reject("Sessão expirada ou não autenticada");
+    }
+
+    const config = { ...options, headers: { ...headers, ...options.headers } };
+    
+    console.log(`A fazer pedido AJAX para: ${CONFIG.SUPABASE_URL}${endpoint}`);
+    const response = await fetch(`${CONFIG.SUPABASE_URL}${endpoint}`, config); // Lendo do config.js
+    
+    if (response.status === 401) {
+        let serverReason = "Desconocido";
+        try {
+            const errorData = await response.json();
+            serverReason = JSON.stringify(errorData);
+        } catch(e) {}
+
+        console.error(`💥 ERROR 401 en: ${endpoint}`);
+        console.error(`🔍 MOTIVO DEL SERVIDOR:`, serverReason);
+
+        return Promise.reject("Sessão expirada"); 
+    }
+
+    if (!response.ok) {
+        let errorMsg = `Erro HTTP ${response.status}`;
+        try {
+            const errorData = await response.json();
+            errorMsg = errorData.message || errorData.error_description || errorData.hint || errorMsg;
+        } catch(e) {}
+        throw new Error(errorMsg);
+    }
+
+    if (response.status === 204) return null;
+    
+    const contentType = response.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+        return response.json();
+    } else {
+        return null; 
+    }
+};
 
 // ==========================================
-// LÓGICA DE LOGIN (index.html)
+// 2. LÓGICA DE LOGIN VIA AJAX
 // ==========================================
 const loginForm = document.getElementById('login-form');
 
@@ -20,24 +71,36 @@ if (loginForm) {
         btnLogin.disabled = true;
         errorDiv.classList.add('hidden');
 
-        const { data, error } = await supabaseClient.auth.signInWithPassword({
-            email: email,
-            password: password,
-        });
+        try {
+            const data = await apiFetch(CONFIG.ENDPOINTS.LOGIN, {
+                method: 'POST',
+                body: JSON.stringify({ email, password })
+            });
 
-        if (error) {
+            localStorage.setItem('sb_token', data.access_token);
+            localStorage.setItem('sb_user', JSON.stringify(data.user));
+            
+            window.location.href = 'dashboard.html';
+        } catch (error) {
+            console.error(error);
             errorDiv.textContent = 'Erro no login: Verifica o email e a palavra-passe.';
             errorDiv.classList.remove('hidden');
             btnLogin.textContent = 'Entrar';
             btnLogin.disabled = false;
-        } else {
-            window.location.href = 'dashboard.html';
         }
     });
 }
 
 // ==========================================
-// LÓGICA DO DASHBOARD (dashboard.html)
+// FUNÇÕES AUXILIARES DE SESSÃO
+// ==========================================
+function getCurrentUser() {
+    const userStr = localStorage.getItem('sb_user');
+    return userStr ? JSON.parse(userStr) : null;
+}
+
+// ==========================================
+// 3. LÓGICA DO DASHBOARD (dashboard.html)
 // ==========================================
 const ticketsBody = document.getElementById('tickets-body');
 
@@ -46,17 +109,23 @@ if (ticketsBody) {
 }
 
 async function initDashboard() {
-    const { data: { user } } = await supabaseClient.auth.getUser();
+    const user = getCurrentUser();
 
     if (!user) {
-        window.location.href = 'index.html';
+        console.error("💥 ERROR: No hay datos de usuario en el LocalStorage.");
+        window.location.href = 'index.html'; 
         return;
     }
 
     document.getElementById('user-email-display').textContent = user.email;
 
     document.getElementById('btn-logout').addEventListener('click', async () => {
-        await supabaseClient.auth.signOut();
+        try {
+            await apiFetch(CONFIG.ENDPOINTS.LOGOUT, { method: 'POST' });
+        } catch(e) {}
+        
+        localStorage.removeItem('sb_token');
+        localStorage.removeItem('sb_user');
         window.location.href = 'index.html';
     });
 
@@ -66,7 +135,7 @@ async function initDashboard() {
 }
 
 // ==========================================
-// CARREGAR E FILTRAR A TABELA (Server-Side)
+// CARREGAR E FILTRAR A TABELA (SÓ DO UTILIZADOR)
 // ==========================================
 let tableSearchTimeout = null;
 
@@ -75,144 +144,113 @@ async function fetchTickets() {
     ticketsBody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 text-center text-blue-500 flex justify-center items-center gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A carregar dados...</td></tr>';
     lucide.createIcons();
 
-    const { data: { user } } = await supabaseClient.auth.getUser();
+    const user = getCurrentUser();
     if (!user) return;
 
-    // 1. Ler os valores atuais dos filtros
     const searchTerm = document.getElementById('table_search').value.trim();
     const sortOrder = document.getElementById('table_sort').value;
     const dateInput = document.getElementById('table_date_filter');
     const dateValue = dateInput ? dateInput.value : '';
 
-    // 2. Começar a construir a Query base
-    let query = supabaseClient
-        .from('ticket_management')
-        .select('*')
-        .eq('user_id', user.id)
-        .limit(100);
+    let url = `${CONFIG.ENDPOINTS.MANAGEMENT}?user_id=eq.${user.id}&select=*`;
 
-    // 3. Aplicar a Pesquisa
     if (searchTerm.length > 0) {
-        query = query.or(`title.ilike.%${searchTerm}%,internal_id.ilike.%${searchTerm}%`);
+        url += `&or=(title.ilike.*${searchTerm}*,internal_id.ilike.*${searchTerm}*)`;
     }
 
-    // 3.5. Aplicar o Filtro de Data
     if (dateValue) {
-        query = query.eq('task_date', dateValue);
+        url += `&task_date=eq.${dateValue}`;
     }
 
-    // 4. Aplicar a Ordenação
     switch (sortOrder) {
-        case 'date_desc':
-            query = query.order('task_date', { ascending: false }).order('created_at', { ascending: false });
-            break;
-        case 'date_asc':
-            query = query.order('task_date', { ascending: true });
-            break;
-        case 'time_desc':
-            query = query.order('work_time_hours', { ascending: false }).order('work_time_minutes', { ascending: false });
-            break;
-        case 'time_asc':
-            query = query.order('work_time_hours', { ascending: true }).order('work_time_minutes', { ascending: true });
-            break;
+        case 'date_desc': url += '&order=task_date.desc,created_at.desc'; break;
+        case 'date_asc': url += '&order=task_date.asc'; break;
+        case 'time_desc': url += '&order=work_time_hours.desc,work_time_minutes.desc'; break;
+        case 'time_asc': url += '&order=work_time_hours.asc,work_time_minutes.asc'; break;
     }
+    url += `&limit=${CONFIG.UI.DASHBOARD_LIMIT}`;
 
-    // 5. Executar a Query
-    const { data, error } = await query;
-    const dailyTotalElement = document.getElementById('daily-total');
+    try {
+        const data = await apiFetch(url);
+        const dailyTotalElement = document.getElementById('daily-total');
 
-    if (error) {
+        if (!data || data.length === 0) {
+            ticketsBody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 text-center text-gray-500">Nenhum registo encontrado.</td></tr>';
+            if (dailyTotalElement) dailyTotalElement.classList.add('hidden');
+            return;
+        }
+
+        const datas = data.map(t => t.task_date);
+        const dataMaisRecente = datas.sort((a, b) => b.localeCompare(a))[0];
+        const registosDoDia = data.filter(t => t.task_date === dataMaisRecente);
+
+        let totalHoras = 0; let totalMinutos = 0;
+        registosDoDia.forEach(t => {
+            totalHoras += t.work_time_hours || 0;
+            totalMinutos += t.work_time_minutes || 0;
+        });
+
+        totalHoras += Math.floor(totalMinutos / 60);
+        totalMinutos = totalMinutos % 60;
+
+        if (dailyTotalElement) {
+            const [ano, mes, dia] = dataMaisRecente.split('-');
+            dailyTotalElement.innerHTML = `Total de ${dia}/${mes}: <span class="font-bold ml-1">${totalHoras}h ${totalMinutos}m</span>`;
+            dailyTotalElement.classList.remove('hidden');
+        }
+
+        ticketsBody.innerHTML = ''; 
+        data.forEach(ticket => {
+            const horas = ticket.work_time_hours || 0;
+            const minutos = ticket.work_time_minutes || 0;
+            const tempoFormatado = `${horas}h ${minutos}m`;
+            
+            const [ano, mes, dia] = ticket.task_date.split('-');
+            const dataFormatada = `${dia}/${mes}/${ano}`;
+
+            const tr = document.createElement('tr');
+            tr.className = 'mobile-card sm:table-row hover:bg-gray-50 transition border-b border-gray-100 min-w-full';
+            
+            tr.innerHTML = `
+                <td class="sm:table-cell sm:px-4 sm:py-2 sm:w-32 whitespace-nowrap">
+                    <span class="bg-green-50 text-green-700 px-2 py-1 rounded text-[10px] sm:text-xs font-medium border border-green-100 inline-flex items-center gap-1">
+                        <i data-lucide="calendar" class="w-3 h-3"></i> ${dataFormatada}
+                    </span>
+                </td>
+                <td class="sm:table-cell sm:px-4 sm:py-2">
+                    <div class="flex flex-col">
+                        <span class="text-[9px] sm:text-[10px] text-blue-600 font-bold mb-0">${ticket.internal_id || 'N/A'}</span>
+                        <span class="text-xs sm:text-sm text-gray-800 font-medium leading-tight">${ticket.title || 'Sem título'}</span>
+                    </div>
+                </td>
+                <td class="sm:table-cell sm:px-4 sm:py-2 sm:w-24 whitespace-nowrap text-center">
+                    <span class="bg-blue-50 text-blue-700 px-2 py-1 rounded text-[10px] sm:text-xs font-medium border border-blue-100 inline-flex items-center gap-1">
+                        <i data-lucide="clock" class="w-3 h-3"></i> ${tempoFormatado}
+                    </span>
+                </td>
+                <td class="sm:table-cell sm:px-4 sm:py-2 sm:w-32 whitespace-nowrap text-right">
+                    <div class="flex gap-2 sm:justify-end mt-2 sm:mt-0">
+                        <button class="flex-1 sm:flex-none p-1.5 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 transition flex items-center justify-center" onclick="loadEditData(${ticket.id})">
+                            <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                            <span class="sm:hidden text-xs font-bold ml-2">Editar</span>
+                        </button>
+                        <button class="flex-1 sm:flex-none p-1.5 bg-red-100 text-red-800 rounded-md hover:bg-red-200 transition flex items-center justify-center" onclick="deleteTicket(${ticket.id})">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                            <span class="sm:hidden text-xs font-bold ml-2">Apagar</span>
+                        </button>
+                    </div>
+                </td>
+            `;
+            ticketsBody.appendChild(tr);
+        });
+
+        lucide.createIcons();
+    } catch (error) {
         console.error('Erro ao buscar tickets:', error);
         ticketsBody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 text-center text-red-500">Erro ao carregar dados.</td></tr>';
+        const dailyTotalElement = document.getElementById('daily-total');
         if (dailyTotalElement) dailyTotalElement.classList.add('hidden');
-        return;
     }
-
-    if (!data || data.length === 0) {
-        ticketsBody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 text-center text-gray-500">Nenhum registo encontrado.</td></tr>';
-        if (dailyTotalElement) dailyTotalElement.classList.add('hidden');
-        return;
-    }
-
-    // ==========================================
-    // NOVA LÓGICA: CALCULAR O TOTAL DO DIA MAIS RECENTE
-    // ==========================================
-    
-    // A. Encontrar a data mais recente (como estão em YYYY-MM-DD, a ordem alfabética funciona perfeitamente)
-    const datas = data.map(t => t.task_date);
-    const dataMaisRecente = datas.sort((a, b) => b.localeCompare(a))[0];
-
-    // B. Filtrar os registos que pertencem APENAS a essa data
-    const registosDoDia = data.filter(t => t.task_date === dataMaisRecente);
-
-    // C. Somar tudo
-    let totalHoras = 0;
-    let totalMinutos = 0;
-
-    registosDoDia.forEach(t => {
-        totalHoras += t.work_time_hours || 0;
-        totalMinutos += t.work_time_minutes || 0;
-    });
-
-    // D. Converter minutos excedentes em horas (ex: 75 min = +1 hora e 15 min)
-    totalHoras += Math.floor(totalMinutos / 60);
-    totalMinutos = totalMinutos % 60;
-
-    // E. Atualizar o HTML
-    if (dailyTotalElement) {
-        const [ano, mes, dia] = dataMaisRecente.split('-');
-        dailyTotalElement.innerHTML = `Total de ${dia}/${mes}: <span class="font-bold ml-1">${totalHoras}h ${totalMinutos}m</span>`;
-        dailyTotalElement.classList.remove('hidden');
-    }
-    // ==========================================
-
-    // 6. Pintar a tabela
-    ticketsBody.innerHTML = ''; 
-    data.forEach(ticket => {
-        const horas = ticket.work_time_hours || 0;
-        const minutos = ticket.work_time_minutes || 0;
-        const tempoFormatado = `${horas}h ${minutos}m`;
-        
-        const [ano, mes, dia] = ticket.task_date.split('-');
-        const dataFormatada = `${dia}/${mes}/${ano}`;
-
-        const tr = document.createElement('tr');
-        tr.className = 'mobile-card sm:table-row hover:bg-gray-50 transition border-b border-gray-100 min-w-full';
-        
-        tr.innerHTML = `
-            <td class="sm:table-cell sm:px-4 sm:py-2 sm:w-32 whitespace-nowrap">
-                <span class="bg-green-50 text-green-700 px-2 py-1 rounded text-[10px] sm:text-xs font-medium border border-green-100 inline-flex items-center gap-1">
-                    <i data-lucide="calendar" class="w-3 h-3"></i> ${dataFormatada}
-                </span>
-            </td>
-            <td class="sm:table-cell sm:px-4 sm:py-2">
-                <div class="flex flex-col">
-                    <span class="text-[9px] sm:text-[10px] text-blue-600 font-bold mb-0">${ticket.internal_id || 'N/A'}</span>
-                    <span class="text-xs sm:text-sm text-gray-800 font-medium leading-tight">${ticket.title || 'Sem título'}</span>
-                </div>
-            </td>
-            <td class="sm:table-cell sm:px-4 sm:py-2 sm:w-24 whitespace-nowrap text-center">
-                <span class="bg-blue-50 text-blue-700 px-2 py-1 rounded text-[10px] sm:text-xs font-medium border border-blue-100 inline-flex items-center gap-1">
-                    <i data-lucide="clock" class="w-3 h-3"></i> ${tempoFormatado}
-                </span>
-            </td>
-            <td class="sm:table-cell sm:px-4 sm:py-2 sm:w-32 whitespace-nowrap text-right">
-                <div class="flex gap-2 sm:justify-end mt-2 sm:mt-0">
-                    <button class="flex-1 sm:flex-none p-1.5 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 transition flex items-center justify-center" onclick="loadEditData(${ticket.id})">
-                        <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
-                        <span class="sm:hidden text-xs font-bold ml-2">Editar</span>
-                    </button>
-                    <button class="flex-1 sm:flex-none p-1.5 bg-red-100 text-red-800 rounded-md hover:bg-red-200 transition flex items-center justify-center" onclick="deleteTicket(${ticket.id})">
-                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-                        <span class="sm:hidden text-xs font-bold ml-2">Apagar</span>
-                    </button>
-                </div>
-            </td>
-        `;
-        ticketsBody.appendChild(tr);
-    });
-
-    lucide.createIcons();
 }
 
 // ==========================================
@@ -229,72 +267,53 @@ function setupTableFilters() {
     const dateFilter = document.getElementById('table_date_filter');
     const clearDateBtn = document.getElementById('clear_date_filter');
 
-    // Lógica do Filtro de Data
     if (dateFilter) {
         dateFilter.addEventListener('change', () => {
-            // Mostra ou esconde o X
-            if (clearDateBtn) {
-                clearDateBtn.classList.toggle('hidden', dateFilter.value === '');
-            }
-            fetchTickets(); // Recarrega a tabela com a nova data
+            if (clearDateBtn) clearDateBtn.classList.toggle('hidden', dateFilter.value === '');
+            fetchTickets(); 
         });
 
-        // Quando clica no X da data
         if (clearDateBtn) {
             clearDateBtn.addEventListener('click', () => {
                 dateFilter.value = '';
                 clearDateBtn.classList.add('hidden');
-                fetchTickets(); // Atualiza a tabela
+                fetchTickets(); 
             });
         }
     }
 
-    // 1. Lógica do Buscador (Debounce 400ms) e Botão X
     if (searchInput) {
         searchInput.addEventListener('input', () => {
-            // Mostra ou esconde o X dependendo se há texto
-            if (clearTableBtn) {
-                clearTableBtn.classList.toggle('hidden', searchInput.value.length === 0);
-            }
-
+            if (clearTableBtn) clearTableBtn.classList.toggle('hidden', searchInput.value.length === 0);
             clearTimeout(tableSearchTimeout);
-            tableSearchTimeout = setTimeout(() => {
-                fetchTickets();
-            }, 400);
+            tableSearchTimeout = setTimeout(() => { fetchTickets(); }, CONFIG.UI.SEARCH_DELAY_MS);
         });
 
-        // Quando clica no X da tabela
         if (clearTableBtn) {
             clearTableBtn.addEventListener('click', () => {
                 searchInput.value = '';
-                clearTableBtn.classList.add('hidden'); // Esconde o X
-                fetchTickets(); // Atualiza a tabela imediatamente
-                searchInput.focus(); // Devolve o cursor ao input para continuar a escrever
+                clearTableBtn.classList.add('hidden'); 
+                fetchTickets(); 
+                searchInput.focus(); 
             });
         }
     }
 
-    // 2. Lógica de Abrir/Fechar o Menu Customizado
     if (sortBtn) {
         sortBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); // Evita que feche logo a seguir
+            e.stopPropagation(); 
             sortOptions.classList.toggle('hidden');
         });
 
-        // Clicar numa das opções bonitas
         optionItems.forEach(item => {
             item.addEventListener('click', () => {
-                // Atualizamos o texto visível e o valor oculto
                 sortLabel.textContent = item.textContent;
                 hiddenSortInput.value = item.getAttribute('data-value');
-                
-                // Fechamos o menu e procuramos na base de dados
                 sortOptions.classList.add('hidden');
                 fetchTickets(); 
             });
         });
 
-        // Se clicar fora do menu, ele fecha-se automaticamente
         document.addEventListener('click', (e) => {
             if (!sortBtn.contains(e.target) && !sortOptions.contains(e.target)) {
                 sortOptions.classList.add('hidden');
@@ -316,13 +335,10 @@ if (recordForm) {
         e.preventDefault();
         
         const btnSave = document.getElementById('btn-save');
-        const btnReset = document.querySelector('button[type="reset"]'); 
-        
         btnSave.textContent = 'A guardar...';
         btnSave.disabled = true;
 
-        const { data: { user } } = await supabaseClient.auth.getUser();
-
+        const user = getCurrentUser();
         if (!user) {
             alert('Sessão expirada. Por favor, faz login novamente.');
             window.location.href = 'index.html';
@@ -334,14 +350,12 @@ if (recordForm) {
         const workMinutes = document.getElementById('work_minutes').value || 0;
         const selectValue = document.getElementById('ticket_select').value;
 
-        // --- AÑADE ESTA VALIDACIÓN AQUÍ ---
         if (!selectValue) {
             showToast('Por favor, pesquisa e seleciona um ticket da lista.', 'error');
             btnSave.disabled = false;
             btnSave.textContent = currentEditId ? 'Atualizar Registo' : 'Guardar Registo';
-            return; // Detiene la ejecución
+            return; 
         }
-        // ----------------------------------
 
         const [internalId, title] = selectValue.split('||');
 
@@ -355,47 +369,41 @@ if (recordForm) {
             user_email: user.email    
         };
 
-        let dbError;
+        try {
+            if (currentEditId) {
+                await apiFetch(`${CONFIG.ENDPOINTS.MANAGEMENT}?id=eq.${currentEditId}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify(recordData)
+                });
+                showToast('Registo atualizado com sucesso!', 'success');
+            } else {
+                await apiFetch(CONFIG.ENDPOINTS.MANAGEMENT, {
+                    method: 'POST',
+                    body: JSON.stringify(recordData)
+                });
+                showToast('Registo guardado com sucesso!', 'success');
+            }
 
-        if (currentEditId) {
-            const { error } = await supabaseClient
-                .from('ticket_management')
-                .update(recordData)
-                .eq('id', currentEditId);
-            dbError = error;
-        } else {
-            const { error } = await supabaseClient
-                .from('ticket_management')
-                .insert([recordData]);
-            dbError = error;
-        }
-
-        btnSave.disabled = false;
-
-        if (dbError) {
-            console.error('Erro ao guardar:', dbError);
-            showToast('Erro ao guardar o registo.', 'error');
-            btnSave.textContent = currentEditId ? 'Atualizar Registo' : 'Guardar Registo';
-        } else {
-            const mensagem = currentEditId ? 'Registo atualizado com sucesso!' : 'Registo guardado com sucesso!';
-            showToast(mensagem, 'success');
-            
             recordForm.reset(); 
             fetchTickets(); 
+        } catch (error) {
+            console.error('Erro ao guardar:', error);
+            showToast('Erro ao guardar o registo.', 'error');
+        } finally {
+            btnSave.disabled = false;
+            btnSave.textContent = currentEditId ? 'Atualizar Registo' : 'Guardar Registo';
         }
     });
 
-    // Detectar quando se pulsa el botão "Limpar" / "Cancelar"
     recordForm.addEventListener('reset', () => {
         currentEditId = null;
         document.getElementById('btn-save').textContent = 'Guardar Registo';
         document.querySelector('button[type="reset"]').textContent = 'Limpar';
         
-        // Vaciamos el desplegable inteligente (el visible y el oculto)
         document.getElementById('ticket_search').value = '';
         document.getElementById('ticket_select').value = '';
         
-        setTimeout(() => document.getElementById('task_date').valueAsDate = new Date(), 10);
+        setTimeout(() => document.getElementById('task_date').value = new Date().toISOString().split('T')[0], 10);
     });
 }
 
@@ -404,47 +412,37 @@ if (recordForm) {
 // ==========================================
 window.deleteTicket = async function(id) {
     const confirmar = confirm("Tens a certeza que queres apagar este registo? Esta ação não pode ser desfeita.");
-    
     if (!confirmar) return;
 
-    const { error } = await supabaseClient
-        .from('ticket_management')
-        .delete()
-        .eq('id', id);
-
-    if (error) {
+    try {
+        await apiFetch(`${CONFIG.ENDPOINTS.MANAGEMENT}?id=eq.${id}`, { method: 'DELETE' });
+        showToast('Registo apagado com sucesso!', 'success');
+        fetchTickets(); 
+    } catch (error) {
         console.error('Erro ao apagar:', error);
         showToast('Erro ao apagar o registo.', 'error');
-    } else {
-        showToast('Registo apagado com sucesso!', 'success');
-        fetchTickets(); // Atualiza a tabela após apagar
     }
 };
 
 // ==========================================
 // SMART DROPDOWN (Pesquisa Híbrida de Tickets)
 // ==========================================
-let initialTickets = []; // Guarda os últimos 50 para acesso rápido
-let searchTimeout = null; // Controla o delay da escrita (Debounce)
+let initialTickets = []; 
+let searchTimeout = null; 
 
 async function loadTicketsDropdown() {
-    // 1. Carregar os 50 mais recentes assim que a página abre
-    const { data, error } = await supabaseClient
-        .from('tickets')
-        .select('id, subject')
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-    if (!error && data) {
-        initialTickets = data;
+    try {
+        const data = await apiFetch(`${CONFIG.ENDPOINTS.TICKETS}?select=id,title&order=created_at.desc&limit=${CONFIG.UI.DROPDOWN_INITIAL_LIMIT}`);
+        if (data) initialTickets = data;
+    } catch(e) {
+        console.warn('Não foi possível carregar a lista inicial de tickets');
     }
-    
     setupTicketSearch();
 }
 
 function renderDropdown(tickets) {
     const dropdown = document.getElementById('ticket_dropdown');
-    dropdown.innerHTML = ''; // Limpar lista
+    dropdown.innerHTML = ''; 
 
     if (tickets.length === 0) {
         dropdown.innerHTML = '<li class="px-4 py-2 text-sm text-gray-500">Nenhum ticket encontrado.</li>';
@@ -452,17 +450,14 @@ function renderDropdown(tickets) {
         return;
     }
 
-    // Criar as linhas (opções) na lista
     tickets.forEach(ticket => {
         const li = document.createElement('li');
         li.className = 'px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors border-b border-gray-50';
-        li.textContent = ticket.subject;
-        
-        // Quando o utilizador clica numa opção:
+        li.textContent = ticket.title;
         li.addEventListener('click', () => {
-            document.getElementById('ticket_search').value = ticket.subject; // Texto visível
-            document.getElementById('ticket_select').value = `${ticket.id}||${ticket.subject}`; // Valor oculto p/ guardar
-            dropdown.classList.add('hidden'); // Esconder a lista
+            document.getElementById('ticket_search').value = ticket.title; 
+            document.getElementById('ticket_select').value = `${ticket.id}||${ticket.title}`; 
+            dropdown.classList.add('hidden'); 
         });
 
         dropdown.appendChild(li);
@@ -475,7 +470,6 @@ function setupTicketSearch() {
     const searchInput = document.getElementById('ticket_search');
     const dropdown = document.getElementById('ticket_dropdown');
 
-    // Mostrar os recentes ao clicar no input (se estiver vazio)
     searchInput.addEventListener('focus', () => {
         if (searchInput.value.length === 0) {
             renderDropdown(initialTickets);
@@ -484,27 +478,22 @@ function setupTicketSearch() {
         }
     });
 
-    // Esconder a lista ao clicar fora dela
     document.addEventListener('click', (e) => {
         if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
             dropdown.classList.add('hidden');
         }
     });
 
-    // A MÁGICA: Detetar o que o utilizador escreve
     searchInput.addEventListener('input', (e) => {
         const term = e.target.value.trim();
+        clearTimeout(searchTimeout); 
 
-        clearTimeout(searchTimeout); // Cancelar a pesquisa anterior se ele ainda estiver a escrever
-
-        // Se apagou tudo, volta a mostrar os recentes
         if (term.length === 0) {
             renderDropdown(initialTickets);
             document.getElementById('ticket_select').value = ''; 
             return;
         }
 
-        // Se escreveu pouco, pede para escrever mais
         if (term.length < 3) {
             dropdown.innerHTML = '<li class="px-4 py-2 text-sm text-gray-500">Escreve pelo menos 3 caracteres...</li>';
             dropdown.classList.remove('hidden');
@@ -512,59 +501,47 @@ function setupTicketSearch() {
             return;
         }
 
-        // Se escreveu 3 ou mais, pesquisar no Supabase após 400ms (Debounce)
         searchTimeout = setTimeout(async () => {
             dropdown.innerHTML = '<li class="px-4 py-2 text-sm text-blue-600 flex items-center gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A procurar...</li>';
             lucide.createIcons();
 
-            const { data, error } = await supabaseClient
-                .from('tickets')
-                .select('id, subject')
-                .ilike('subject', `%${term}%`) // O símbolo % funciona como "contém esta palavra"
-                .order('created_at', { ascending: false })
-                .limit(20);
-
-            if (error) {
-                dropdown.innerHTML = '<li class="px-4 py-2 text-sm text-red-500">Erro na pesquisa.</li>';
-            } else {
+            try {
+                const data = await apiFetch(`${CONFIG.ENDPOINTS.TICKETS}?select=id,title&title=ilike.*${term}*&order=created_at.desc&limit=${CONFIG.UI.DROPDOWN_SEARCH_LIMIT}`);
                 renderDropdown(data);
+            } catch (error) {
+                dropdown.innerHTML = '<li class="px-4 py-2 text-sm text-red-500">Erro na pesquisa.</li>';
             }
-        }, 400);
+        }, CONFIG.UI.SEARCH_DELAY_MS);
     });
 }
+
 // ==========================================
 // FUNCIÓN PARA CARGAR DATOS EN EL FORMULARIO
 // ==========================================
 window.loadEditData = async function(id) {
-    const { data, error } = await supabaseClient
-        .from('ticket_management')
-        .select('*')
-        .eq('id', id)
-        .single(); 
+    try {
+        const data = await apiFetch(`${CONFIG.ENDPOINTS.MANAGEMENT}?id=eq.${id}&select=*`);
+        
+        if (!data || data.length === 0) throw new Error("Registo não encontrado");
+        
+        const record = data[0];
 
-    if (error) {
+        document.getElementById('task_date').value = record.task_date;
+        document.getElementById('work_hours').value = record.work_time_hours;
+        document.getElementById('work_minutes').value = record.work_time_minutes;
+        
+        document.getElementById('ticket_select').value = `${record.internal_id}||${record.title}`;
+        document.getElementById('ticket_search').value = record.title;
+
+        currentEditId = record.id;
+        document.getElementById('btn-save').textContent = 'Atualizar Registo';
+        document.querySelector('button[type="reset"]').textContent = 'Cancelar'; 
+
+        document.getElementById('form-section').scrollIntoView({ behavior: 'smooth' });
+    } catch (error) {
         console.error('Erro ao buscar dados para edição:', error);
         showToast('Erro ao carregar os dados para edição.', 'error');
-        return;
     }
-
-    document.getElementById('task_date').value = data.task_date;
-    document.getElementById('work_hours').value = data.work_time_hours;
-    document.getElementById('work_minutes').value = data.work_time_minutes;
-    
-    // Actualizamos el ID oculto que se guarda en BD
-    document.getElementById('ticket_select').value = `${data.internal_id}||${data.title}`;
-    
-    // Actualizamos el texto visible que lee el usuario en el cajón de búsqueda
-    document.getElementById('ticket_search').value = data.title;
-
-    currentEditId = data.id;
-    document.getElementById('btn-save').textContent = 'Atualizar Registo';
-    
-    // <--- MAGIA AQUÍ: Cambiamos el texto del botón a "Cancelar"
-    document.querySelector('button[type="reset"]').textContent = 'Cancelar'; 
-
-    document.getElementById('form-section').scrollIntoView({ behavior: 'smooth' });
 };
 
 // ==========================================
@@ -576,24 +553,19 @@ function setupFormClearButton() {
     const ticketHidden = document.getElementById('ticket_select');
 
     if (ticketSearch && clearTicketBtn) {
-        // Mostrar/esconder o X ao escrever
         ticketSearch.addEventListener('input', () => {
             clearTicketBtn.classList.toggle('hidden', ticketSearch.value.length === 0);
-            
-            // Se apagar tudo, limpa o ID oculto também
             if (ticketSearch.value === '') {
                 if(ticketHidden) ticketHidden.value = '';
             }
         });
 
-        // Quando clica no X
         clearTicketBtn.addEventListener('click', () => {
             ticketSearch.value = '';
             if(ticketHidden) ticketHidden.value = '';
-            clearTicketBtn.classList.add('hidden'); // Esconde o X novamente
-            ticketSearch.focus(); // Devolve o cursor para o input
+            clearTicketBtn.classList.add('hidden'); 
+            ticketSearch.focus(); 
             
-            // Recarrega os ícones caso seja necessário
             if (typeof lucide !== 'undefined') {
                 lucide.createIcons();
             }
@@ -601,7 +573,6 @@ function setupFormClearButton() {
     }
 }
 
-// Garante que a função roda quando a página carrega
 document.addEventListener('DOMContentLoaded', () => {
     setupFormClearButton();
 });
@@ -610,20 +581,16 @@ document.addEventListener('DOMContentLoaded', () => {
 // SISTEMA DE NOTIFICAÇÕES (TOAST)
 // ==========================================
 window.showToast = function(message, type = 'success') {
-    // 1. Procurar ou criar o contentor principal no canto superior direito
     let container = document.getElementById('toast-container');
     if (!container) {
         container = document.createElement('div');
         container.id = 'toast-container';
-        // Fica fixo no topo à direita, sobrepondo tudo (z-50)
         container.className = 'fixed top-5 right-5 z-50 flex flex-col gap-3 pointer-events-none';
         document.body.appendChild(container);
     }
 
-    // 2. Criar a "tostada" (o aviso)
     const toast = document.createElement('div');
     
-    // 3. Escolher cores e ícones baseados no tipo de aviso
     let bgColor, textColor, icon;
     if (type === 'success') {
         bgColor = 'bg-green-100'; textColor = 'text-green-800';
@@ -636,22 +603,18 @@ window.showToast = function(message, type = 'success') {
         icon = '<i data-lucide="info" class="w-5 h-5"></i>';
     }
 
-    // Estilo do Toast com animação (começa fora do ecrã com translate-x-full)
     toast.className = `flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg border border-white/20 ${bgColor} ${textColor} transform transition-all duration-300 translate-x-full opacity-0 max-w-sm`;
     toast.innerHTML = `${icon} <span class="text-sm font-semibold">${message}</span>`;
 
-    // 4. Adicionar ao ecrã e renderizar o ícone
     container.appendChild(toast);
     lucide.createIcons();
 
-    // 5. Animar a entrada (desliza para a esquerda)
     setTimeout(() => {
         toast.classList.remove('translate-x-full', 'opacity-0');
     }, 10);
 
-    // 6. Animar a saída e apagar do HTML após 3 segundos
     setTimeout(() => {
         toast.classList.add('translate-x-full', 'opacity-0');
-        setTimeout(() => toast.remove(), 300); // Espera a animação acabar para destruir
+        setTimeout(() => toast.remove(), 300); 
     }, 3000);
 };
