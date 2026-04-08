@@ -432,7 +432,7 @@ let searchTimeout = null;
 
 async function loadTicketsDropdown() {
     try {
-        const data = await apiFetch(`${CONFIG.ENDPOINTS.TICKETS}?select=id,title&order=created_at.desc&limit=${CONFIG.UI.DROPDOWN_INITIAL_LIMIT}`);
+        const data = await apiFetch(`${CONFIG.ENDPOINTS.TICKETS}?select=ticket_number,title&order=created_at.desc&limit=${CONFIG.UI.DROPDOWN_INITIAL_LIMIT}`);
         if (data) initialTickets = data;
     } catch(e) {
         console.warn('Não foi possível carregar a lista inicial de tickets');
@@ -456,7 +456,7 @@ function renderDropdown(tickets) {
         li.textContent = ticket.title;
         li.addEventListener('click', () => {
             document.getElementById('ticket_search').value = ticket.title; 
-            document.getElementById('ticket_select').value = `${ticket.id}||${ticket.title}`; 
+            document.getElementById('ticket_select').value = `${ticket.ticket_number}||${ticket.title}`; 
             dropdown.classList.add('hidden'); 
         });
 
@@ -506,7 +506,7 @@ function setupTicketSearch() {
             lucide.createIcons();
 
             try {
-                const data = await apiFetch(`${CONFIG.ENDPOINTS.TICKETS}?select=id,title&title=ilike.*${term}*&order=created_at.desc&limit=${CONFIG.UI.DROPDOWN_SEARCH_LIMIT}`);
+                const data = await apiFetch(`${CONFIG.ENDPOINTS.TICKETS}?select=ticket_number,title&title=ilike.*${term}*&order=created_at.desc&limit=${CONFIG.UI.DROPDOWN_SEARCH_LIMIT}`);
                 renderDropdown(data);
             } catch (error) {
                 dropdown.innerHTML = '<li class="px-4 py-2 text-sm text-red-500">Erro na pesquisa.</li>';

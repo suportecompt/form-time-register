@@ -1,7 +1,6 @@
-// config.js
 const CONFIG = {
     // 1. Base de Dados e Autenticação
-    SUPABASE_URL: 'https://supabase1.myserver.pt', //https://supabase1.myserver.pt/rest/v1/meshgroups
+    SUPABASE_URL: 'https://supabase1.myserver.pt', 
     SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNjEyMzQ1Njc4LCJleHAiOjI2MTIzNDU2Nzh9.szPPmYS9Pa9WENwHSgsrd7i_YaYLmmORiVqA9jguyGc',
 
     // 2. Rotas da API (Endpoints)
@@ -18,5 +17,8 @@ const CONFIG = {
         DROPDOWN_INITIAL_LIMIT: 50,
         DROPDOWN_SEARCH_LIMIT: 20,
         SEARCH_DELAY_MS: 400
-    }
+    },
+
+    // Variable dinámica para la sesión (añadida para la lógica interna)
+    SESSION_TOKEN: null
 };
