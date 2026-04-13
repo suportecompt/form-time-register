@@ -37,6 +37,60 @@
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-10">
 
+        <section id="form-section" class="bg-white p-4 sm:p-8 rounded-2xl shadow border border-gray-100">
+            <h2 class="text-xl font-bold text-gray-800 mb-6 border-b pb-4">Adicionar Intervenção</h2>
+            
+            <form id="record-form" class="space-y-6 max-w-2xl">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="task_date" class="block text-sm font-medium text-gray-700 mb-1">Data da Intervenção</label>
+                        <input type="date" id="task_date" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Tempo Trabalhado</label>
+                        <div class="flex items-center gap-2">
+                            <div class="relative w-full">
+                                <input type="number" id="work_hours" min="0" placeholder="0" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                                <span class="absolute right-3 top-2 text-gray-400">h</span>
+                            </div>
+                            <span class="text-gray-400 font-bold">:</span>
+                            <div class="relative w-full">
+                                <input type="number" id="work_minutes" min="0" max="59" placeholder="0" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                                <span class="absolute right-3 top-2 text-gray-400">m</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="w-full">
+                    <label for="ticket_search" class="block text-sm font-medium text-gray-700 mb-1">Ticket / Chamado</label>
+                    
+                    <div class="relative w-full">
+                        <input type="text" id="ticket_search" placeholder="Escreve para procurar ou clica para ver recentes..." autocomplete="off" class="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white">
+                        
+                        <button type="button" id="clear_ticket_search" class="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 hidden transition-colors">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
+                        
+                        <input type="hidden" id="ticket_select" required>
+                        
+                        <ul id="ticket_dropdown" class="absolute z-50 w-full bg-white border border-gray-200 bottom-full mb-1 rounded-lg shadow-xl max-h-60 overflow-y-auto hidden">
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row gap-3 pt-4">
+                    <button type="submit" id="btn-save" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors duration-200">
+                        Guardar Registo
+                    </button>
+                    <button type="reset" class="w-full sm:w-auto bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 px-6 rounded-lg transition-colors duration-200">
+                        Limpar
+                    </button>
+                </div>
+            </form>
+        </section>
+
         <section class="bg-white p-4 sm:p-8 rounded-2xl shadow border border-gray-100">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
     
@@ -104,60 +158,6 @@
                     </tbody>
                 </table>
             </div>
-        </section>
-
-        <section id="form-section" class="bg-white p-4 sm:p-8 rounded-2xl shadow border border-gray-100">
-            <h2 class="text-xl font-bold text-gray-800 mb-6 border-b pb-4">Adicionar Intervenção</h2>
-            
-            <form id="record-form" class="space-y-6 max-w-2xl">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label for="task_date" class="block text-sm font-medium text-gray-700 mb-1">Data da Intervenção</label>
-                        <input type="date" id="task_date" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all">
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Tempo Trabalhado</label>
-                        <div class="flex items-center gap-2">
-                            <div class="relative w-full">
-                                <input type="number" id="work_hours" min="0" placeholder="0" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                                <span class="absolute right-3 top-2 text-gray-400">h</span>
-                            </div>
-                            <span class="text-gray-400 font-bold">:</span>
-                            <div class="relative w-full">
-                                <input type="number" id="work_minutes" min="0" max="59" placeholder="0" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                                <span class="absolute right-3 top-2 text-gray-400">m</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="w-full">
-                    <label for="ticket_search" class="block text-sm font-medium text-gray-700 mb-1">Ticket / Chamado</label>
-                    
-                    <div class="relative w-full">
-                        <input type="text" id="ticket_search" placeholder="Escreve para procurar ou clica para ver recentes..." autocomplete="off" class="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white">
-                        
-                        <button type="button" id="clear_ticket_search" class="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 hidden transition-colors">
-                            <i data-lucide="x" class="w-4 h-4"></i>
-                        </button>
-                        
-                        <input type="hidden" id="ticket_select" required>
-                        
-                        <ul id="ticket_dropdown" class="absolute z-50 w-full bg-white border border-gray-200 bottom-full mb-1 rounded-lg shadow-xl max-h-60 overflow-y-auto hidden">
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="flex flex-col sm:flex-row gap-3 pt-4">
-                    <button type="submit" id="btn-save" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors duration-200">
-                        Guardar Registo
-                    </button>
-                    <button type="reset" class="w-full sm:w-auto bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 px-6 rounded-lg transition-colors duration-200">
-                        Limpar
-                    </button>
-                </div>
-            </form>
         </section>
 
     </main>
